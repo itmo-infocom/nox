@@ -1,0 +1,8 @@
+{
+  "switchqos" : {
+    "library" : "switchqos",
+    "dependencies" : {
+      "openflow-manager" : "0"
+    }
+  }
+}
