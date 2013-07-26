@@ -21,8 +21,6 @@
 #include <stdexcept>
 #include <stdint.h>
 #include <string>
-#include <fstream>
-#include <iostream>
 
 #include <boost/bind.hpp>
 #include <boost/foreach.hpp>
@@ -90,7 +88,6 @@ private:
     bool setup_flows;
     StatCounter thread_stat;
     StatCounter mac_stat;
-    
 };
 
 inline void
@@ -111,7 +108,7 @@ Switchqos::configure()
     }
     register_handler("Openflow_datapath_join_event", (boost::bind(&Switchqos::handle_datapath_join, this, _1)));
     register_handler("Openflow_datapath_leave_event", (boost::bind(&Switchqos::handle_datapath_leave, this, _1)));
-    register_handler("ofp_packet_in", (boost::bind(&Switchqos::handle_packet_in, this, _1)));    
+    register_handler("ofp_packet_in", (boost::bind(&Switchqos::handle_packet_in, this, _1)));
 }
 
 inline Disposition
@@ -161,10 +158,10 @@ Switchqos::handle_packet_in(const Event& e)
     if (!flow.dl_src().is_multicast())
     {
         mac_table[flow.dl_src()] = pi.in_port();
-        std::string dp_str = dp.id().string().c_str();
-        if (!mac_stat.update_stats(dp_str,mac_table.size()))
+	std::string dp_str = dp.id().string().c_str();
+	if (!mac_stat.update_stats(dp_str,mac_table.size()))
 	    VLOG_DBG(lg,"Failed to update MAC stats");
-	VLOG_DBG(lg,"MAC table for dp %s size: %lu\n",dp_str.c_str(),mac_table.size());
+
     }
 
     if (!flow.dl_dst().is_multicast())
@@ -178,7 +175,7 @@ Switchqos::handle_packet_in(const Event& e)
     if (setup_flows && out_port != -1)
     {
 	//vigil::ethernetaddr empty; // 00-00-00-00-00-00
-	//flow.in_port(0).dl_src(empty).dl_dst(empty); // please no MACs in match - that makes flow software-processed (and very slow)
+
        	flow.wildcards( v1::OFPFW_DL_VLAN | v1::OFPFW_DL_VLAN_PCP | v1::OFPFW_DL_SRC | v1::OFPFW_DL_DST );
 	uint16_t tp_src = flow.tp_src();
 	uint16_t tp_dst = flow.tp_dst();
@@ -186,22 +183,22 @@ Switchqos::handle_packet_in(const Event& e)
 	//v1::ofp_match flow_match;
 	//flow_match.dl_type(flow.dl_type()).nw_proto(nw_proto).tp_src(tp_src).tp_dst(tp_dst);
 	auto fm = v1::ofp_flow_mod().match(flow).buffer_id(pi.buffer_id())
-                   .cookie(0).command(v1::ofp_flow_mod::OFPFC_ADD).idle_timeout(20)
+                   .cookie(0).command(v1::ofp_flow_mod::OFPFC_ADD).idle_timeout(5)
                    .hard_timeout(v1::OFP_FLOW_PERMANENT)
                    .priority(v1::OFP_DEFAULT_PRIORITY);
         auto ao = v1::ofp_action_output().port(out_port);
-	//VLOG_DBG(lg,"New flow with known output port: tp_src=%u tp_dst=%u\n",tp_src,tp_dst);
+	VLOG_DBG(lg,"New flow with known output port: tp_src=%u tp_dst=%u\n",tp_src,tp_dst);
 	
 	// now applying QoS if needed
 	// setting PCP will match packets to one of QoS queues on HP switch
 	if (/* iSCSI */nw_proto == 6 && (tp_src == 3260 || tp_dst == 3260))
 	{
 	    // high priority PCP
-	    auto action_pcp = v1::ofp_action_vlan_pcp().vlan_pcp(4);
+	    //auto action_pcp = v1::ofp_action_vlan_pcp().vlan_pcp(4);
 	    VLOG_DBG(lg,"Applying high priority PCP!");
-	    fm.add_action(&action_pcp);
-	    
-            
+	    //fm.add_action(&action_pcp);
+	    auto action_enqueue = v1::ofp_action_enqueue().port(out_port).queue_id(1);
+            fm.add_action(&action_enqueue);
 	}
 	else if (/*Iperf (default: TCP, port 5001)*/((tp_src == 5001 || tp_dst == 5001)) ||
 	    	 /*SIPp (default: UDP, following ports)*/((tp_src == 5060 || tp_dst == 5060 ||
@@ -210,13 +207,16 @@ Switchqos::handle_packet_in(const Event& e)
 		)
 	{
 	    // low priority PCP
-	    auto action_pcp = v1::ofp_action_vlan_pcp().vlan_pcp(1);
+	    //auto action_pcp = v1::ofp_action_vlan_pcp().vlan_pcp(1);
 	    VLOG_DBG(lg,"Applying low priority PCP!");
-	    fm.add_action(&action_pcp);
-           
-            
+	    //fm.add_action(&action_pcp);
+            auto action_enqueue = v1::ofp_action_enqueue().port(out_port).queue_id(0);
+            fm.add_action(&action_enqueue);
 	}
-	fm.add_action(&ao);
+	else
+        {
+	    fm.add_action(&ao);
+        }
         dp.send(&fm); 
     }
 
